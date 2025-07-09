@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Subir archivo de Urgencias / RIPS</title>
+</head>
+<body>
+  <h1>Sube tu archivo de urgencias</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul>
+      {% for category, msg in messages %}
+        <li
+          {% if category == 'success' %}
+            style="color: green;"
+          {% else %}
+            style="color: red;"
+          {% endif %}
+        >
+          {{ msg }}
+        </li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".xlsx,.xls,.csv" required>
+    <button type="submit">Subir</button>
+  </form>
+</body>
+</html>
