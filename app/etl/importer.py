@@ -11,22 +11,23 @@ def import_urgencias_from_file(filepath):
     """
     Importa un Excel o CSV de urgencias ya subido en 'uploads/'.
     Filtra por sucursal 60 y controla fechas inválidas.
-    Hace upsert en la tabla `registros_urgencias` y devuelve True si todo fue OK.
+    Hace upsert en la tabla `registros_urgencias` y devuelve tupla:
+    (total_registros_filtrados, registros_insertados)
     """
     # Inicializar la app y el contexto de la base de datos
     app = create_app()
     with app.app_context():
-        # 1) Leer el DataFrame (encabezado en la fila 4, índice 3)
+        # Leer el DataFrame (header en fila 4)
         if filepath.lower().endswith(('.xls', '.xlsx')):
             df = pd.read_excel(filepath, header=3, engine='openpyxl')
         else:
             df = pd.read_csv(filepath)
 
-        # 2) Filtrar solo sucursal 60
+        # Filtrar solo sucursal 60
         if 'Codigo Sucursal Afiliado ID' in df.columns:
             df = df[df['Codigo Sucursal Afiliado ID'] == 60]
 
-        # 3) Renombrar columnas para coincidir con atributos del modelo
+        # Renombrar columnas a atributos del modelo
         rename_map = {
             "Fecha Autorizacion ID": "fechaIngreso",
             "Codigo Diagnostico Eps Op ID": "codigoDiagnostico",
@@ -44,19 +45,19 @@ def import_urgencias_from_file(filepath):
         }
         df = df.rename(columns=rename_map)
 
-        # 4) Seleccionar solo columnas que existen en el modelo
+        # Columnas que usaremos
         expected_cols = [
             'fechaIngreso', 'codigoDiagnostico', 'nombreDiagnostico',
             'tipoDocumento', 'documento', 'fechaNacimiento',
             'primerNombre', 'segundoNombre', 'primerApellido',
             'segundoApellido', 'sexo', 'prestador', 'dxInformado'
         ]
-        # Agregar campo constante antes de selección
+        # Agregar campo constante
         df['origenDatos'] = 'URGENCIAS'
         expected_cols.append('origenDatos')
-        df = df[[col for col in expected_cols if col in df.columns]]
+        df = df[[c for c in expected_cols if c in df.columns]]
 
-        # 5) Control de fechas inválidas: convertir con coerción y eliminar NaT
+        # Control de fechas inválidas
         if 'fechaIngreso' in df.columns:
             df['fechaIngreso'] = pd.to_datetime(df['fechaIngreso'], errors='coerce')
             df = df[df['fechaIngreso'].notnull()]
@@ -66,42 +67,37 @@ def import_urgencias_from_file(filepath):
             df = df[df['fechaNacimiento'].notnull()]
             df['fechaNacimiento'] = df['fechaNacimiento'].dt.date
 
-        # 6) Reemplazar NaN restantes con None para MySQL
+        # Reemplazar NaN por None
         df = df.where(pd.notnull(df), None)
 
-        # 7) Eliminar duplicados por PK compuesta
-        if 'fechaIngreso' in df.columns and 'documento' in df.columns:
-            df = df.drop_duplicates(subset=['fechaIngreso', 'documento'])
+        # Conteo antes del upsert
+        total_records = len(df)
+        inserted = 0
 
-        # 8) Upsert en la base de datos
+        # Upsert
         for _, row in df.iterrows():
             fecha = row['fechaIngreso']
             documento = str(row['documento']).split('.')[0]
-
             data = row.to_dict()
             data.pop('fechaIngreso', None)
             data.pop('documento', None)
             data.pop('id', None)
 
-            registro = db.session.query(RegistroUrgencias).filter_by(
+            existing = db.session.query(RegistroUrgencias).filter_by(
                 fechaIngreso=fecha,
                 documento=documento
             ).first()
-
-            if registro:
-                # Actualizar campos
-                for key, value in data.items():
-                    setattr(registro, key, value)
+            if existing:
+                for k, v in data.items(): setattr(existing, k, v)
             else:
-                # Crear nuevo registro; id autoincremental se omite
                 nuevo = RegistroUrgencias(
                     fechaIngreso=fecha,
                     documento=documento,
                     **data
                 )
                 db.session.add(nuevo)
+                inserted += 1
 
-        # 9) Confirmar transacciones
         db.session.commit()
-        # Devuelve la cantidad de registros procesados
-        return len(df)
+        # Retornar total y nuevos insertados
+        return total_records, inserted

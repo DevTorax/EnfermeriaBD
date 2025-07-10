@@ -32,11 +32,12 @@ def upload_file():
         
         # ——> Aquí disparamos el ETL y obtenemos la cuenta
         try:
-            count = import_urgencias_from_file(filepath)
-            flash(f'Importación completada: {count} registros procesados.', 'success')
+            total, inserted = import_urgencias_from_file(filepath)
+            flash(
+                f'Importación completada: {total} registros procesados, {inserted} nuevos insertados.',
+                'success'
+            )
         except Exception as e:
             flash(f'Error en ETL: {e}', 'error')
-
-        return redirect(url_for('upload.upload_file'))
 
     return render_template('upload.html')
